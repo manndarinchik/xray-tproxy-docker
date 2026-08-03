@@ -30,6 +30,8 @@ if [ -n "$GATEWAY_LIST" ]; then
     GATEWAY_LIST="${GATEWAY_LIST:2}"
 fi
 
+DOCKER_NET=$(ip -4 addr show eth0 | awk '/inet / {print $2}')
+
 # Generate nftables.conf
 cat > /nftables.conf << EOF
 #!/usr/sbin/nft -f
@@ -43,6 +45,7 @@ table inet transparentproxy {
     chain tproxy-prerouting {
         type filter hook prerouting priority filter; policy accept;
         # skip whitelist
+        ip saddr $DOCKER_NET return
         ip daddr { $EXCLUDE_NETS_V4 } return
         ip6 daddr { $EXCLUDE_NETS_V6 } return
         # Divert gateway traffic from re-entering proxy
@@ -61,6 +64,7 @@ table inet transparentproxy {
     chain tproxy-output {
         type route hook output priority filter; policy accept;
         # skip white list
+        ip saddr $DOCKER_NET return
         ip daddr { $EXCLUDE_NETS_V4 } return
         ip6 daddr { $EXCLUDE_NETS_V6 } return
         # skip direct traffic returned from tproxy
