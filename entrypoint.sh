@@ -50,6 +50,8 @@ table inet transparentproxy {
         ip daddr { $GATEWAY_LIST } return
         # skip direct traffic returned from tproxy
         meta mark { $TPROXY_EXIT_LIST } return
+        # skip SSH traffic
+        tcp dport 22 return
         # send to tproxy
         meta l4proto { tcp, udp } meta mark set 100 tproxy ip to 127.0.0.1:$TPROXY_PORT accept
         meta l4proto { tcp, udp } meta mark set 100 tproxy ip6 to [::1]:$TPROXY_PORT accept
@@ -63,6 +65,8 @@ table inet transparentproxy {
         ip6 daddr { $EXCLUDE_NETS_V6 } return
         # skip direct traffic returned from tproxy
         meta mark { $TPROXY_EXIT_LIST } return
+        # skip SSH traffic to allow use as jumphost  
+        tcp dport 22 return
         # send to tproxy
         meta l4proto { tcp, udp } meta mark 0 meta mark set 100 accept
     }
