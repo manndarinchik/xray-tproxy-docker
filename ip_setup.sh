@@ -23,6 +23,7 @@ if [ "$DELETE_MODE" = false ]; then
     ip rule add fwmark 100 lookup 100
     ip -6 route add local ::/0 dev lo table 106
     ip -6 rule add fwmark 100 lookup 106
+    echo "Added route: fwmark 100 -> gateway lo (table 100, 106)"
 
     # Create routes to secondary gateways
     if [ -n "$SECONDARY_GATEWAYS" ]; then
@@ -44,6 +45,7 @@ else
     ip route del local 0.0.0.0/0 dev lo table 100 2>/dev/null
     ip -6 rule del fwmark 100 lookup 106 2>/dev/null
     ip -6 route del local ::/0 dev lo table 106 2>/dev/null
+    echo "Deleted route: fwmark 100 -> gateway lo (table 100, 106)"
 
     # Delete routes to secondary gateways
     if [ -n "$SECONDARY_GATEWAYS" ]; then
@@ -59,4 +61,7 @@ else
             echo "Deleted route: fwmark $fwmark -> gateway $gateway (table $table_id)"
         done
     fi
+
+    nft delete table inet transparentproxy 2>/dev/null
+    echo "Deleted nft table inet transparentproxy"
 fi
