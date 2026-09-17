@@ -1,6 +1,5 @@
 #!/bin/bash
 set -e
-
 # Default values
 TPROXY_PORT="${TPROXY_PORT:-2500}"
 TPROXY_OUTPUT_MARK="${TPROXY_OUTPUT_MARK:-200}"
@@ -30,7 +29,7 @@ if [ -n "$GATEWAY_LIST" ]; then
     GATEWAY_LIST="${GATEWAY_LIST:2}"
 fi
 
-DOCKER_NET=$(ip -4 addr show eth0 | awk '/inet / {print $2}')
+PROXY_NET="${PROXY_NET:-'172.17.0.0/16'}"
 
 # Generate nftables.conf
 cat > /nftables.conf << EOF
@@ -43,36 +42,43 @@ delete table inet transparentproxy
 table inet transparentproxy {
     # Divert forwaded traffic to xray
     chain tproxy-prerouting {
-        type filter hook prerouting priority filter; policy accept;
+        type filter hook prerouting priority mangle; policy accept;
+        # Second pass for forwarded traffic (bridge-nf re-entry, LAN-gateway re-entry):
+        # mark is already set from the first pass — do not re-tproxy.
+        # Host-originated traffic re-enters via lo and must NOT be skipped,
+        # because the first tproxy action for it happens here, not in output.
+        meta iifname != "lo" meta mark 100 counter return
+
         # skip whitelist
-        ip saddr $DOCKER_NET return
-        ip daddr { $EXCLUDE_NETS_V4 } return
-        ip6 daddr { $EXCLUDE_NETS_V6 } return
-        # Divert gateway traffic from re-entering proxy
-        ip saddr { $GATEWAY_LIST } return
-        ip daddr { $GATEWAY_LIST } return
+        ip saddr $PROXY_NET counter return
+        ip daddr { $EXCLUDE_NETS_V4 } counter return
+        ip6 daddr { $EXCLUDE_NETS_V6 } counter return
+        # Divert gateway traffic from re-entering counter proxy
+        ip saddr { $GATEWAY_LIST } counter return
+        ip daddr { $GATEWAY_LIST } counter return
         # skip direct traffic returned from tproxy
-        meta mark { $TPROXY_EXIT_LIST } return
+        meta mark { $TPROXY_EXIT_LIST } counter return
         # skip SSH traffic
-        tcp dport 22 return
+        tcp dport 22 counter return
+
         # send to tproxy
-        meta l4proto { tcp, udp } meta mark set 100 tproxy ip to 127.0.0.1:$TPROXY_PORT accept
-        meta l4proto { tcp, udp } meta mark set 100 tproxy ip6 to [::1]:$TPROXY_PORT accept
+        meta l4proto { tcp, udp } meta mark set 100 tproxy ip to :$TPROXY_PORT  counter accept
+        meta l4proto { tcp, udp } meta mark set 100 tproxy ip6 to :$TPROXY_PORT  counter accept
     }
 
     # Divert locally generated outgoing traffic to xray
     chain tproxy-output {
         type route hook output priority filter; policy accept;
         # skip white list
-        ip saddr $DOCKER_NET return
-        ip daddr { $EXCLUDE_NETS_V4 } return
-        ip6 daddr { $EXCLUDE_NETS_V6 } return
+        ip saddr $PROXY_NET counter return
+        ip daddr { $EXCLUDE_NETS_V4 } counter return
+        ip6 daddr { $EXCLUDE_NETS_V6 } counter return
         # skip direct traffic returned from tproxy
-        meta mark { $TPROXY_EXIT_LIST } return
+        meta mark { $TPROXY_EXIT_LIST } counter return
         # skip SSH traffic to allow use as jumphost  
-        tcp dport 22 return
+        tcp dport 22 counter return
         # send to tproxy
-        meta l4proto { tcp, udp } meta mark 0 meta mark set 100 accept
+        meta l4proto { tcp, udp } meta mark 0 meta mark set 100 counter accept
     }
 }
 EOF

@@ -1,119 +1,58 @@
 # Xray transparent proxy Docker Image
 
-Containerized transparent proxy xray service intended to be used as a l4 router between multiple gateways. This container is intended to be attached to host's network to create necessary nftables rules and ip routes on start, as well as to remove them on stop.
+This is a transparent proxy xray service packaged into a docker container. It's intended to be attached to host's network to create necessary nftables rules and ip routes on start, as well as to remove them on stop.
 
-## Example
+Upon launch, the container does the following:
+- creates nftable `transparentproxy` with `tproxy-prerouting` and `tproxy-output` chains
+- creates ip rules and ip tables for each gateway specified
 
-Let's say our goal is to do l4 routing between 2 headscale tailents.
+After finishing the container cleans up all created ip rules, ip tables and nftable specified above. 
 
-docker-compose.yml would then look something like this:
+Traffic that is routed via tproxy:
+- LAN traffic forwarded though the host (from both physical and virtual interfaces - e.g. other docker networks )
+- host's outgoing traffic 
 
-```yml
+Traffic that is not routed via tproxy:
+- any traffic originating from `PROXY_NET` (see below)
+- any traffic originaring from or destined to each IP specified in `SECONDARY_GATEWAYS` (see below)
+- traffic destined to reserved privite IP pools: 10.0.0.0/8,100.64.0.0/10,127.0.0.0/8,172.16.0.0/12,169.254.0.0/16,192.168.0.0/16,::1/128,fe80::/10,fc00::/7,ff00::/8
+- ssh traffic
+
+## Usage
+
+This container must be launched with the following env variables:
+- `PROXY_NET`: IPv4 address of the network where secondary gateways are deployed. It won't be routed via tproxy.
+- `SECONDARY_GATEWAYS`: a comma-separated list of 'fwmark:ipv4_gateway_adress' pairs. Each pair is converted to corresponding ip rules and tables for policy-based routing on tproxy exit.
+
+```yaml
 services:
-  xray-tproxy:
+# Don't forget to add these to host's sysctl.conf:
+# net.ipv4.ip_forward=1
+# net.ipv4.conf.all.rp_filter=0
+# net.ipv4.conf.all.route_localnet=1
+# net.ipv4.ip_nonlocal_bind=1
+
+  xray:
     image: ghcr.io/manndarinchik/xray-tproxy-docker:latest
     container_name: xray
-    restart: unless-stopped
+    restart: always
     environment:
+      - PROXY_NET=172.19.0.0/24
       - SECONDARY_GATEWAYS=1:172.19.0.9
-      # Optional overrides
-      - TPROXY_PORT=2500
-      - TPROXY_OUTPUT_MARK=200
     volumes:
       - ./xray.json:/usr/local/etc/xray/config.json:ro
     cap_add:
       - NET_ADMIN
     network_mode: "host"
     depends_on:
-      - tailscaled-awg
-
-# Don't forget to add these to host's sysctl.conf:
-# net.ipv4.ip_forward=1
-# net.ipv4.conf.all.rp_filter=2
-# net.ipv4.conf.all.route_localnet=1
-# net.ipv4.ip_nonlocal_bind=1
-# net.ipv6.ip_forward=1
-# net.ipv6.conf.all.rp_filter=2
-# net.ipv6.conf.all.route_localnet=1
-# net.ipv6.ip_nonlocal_bind=1
-
-  tailscaled:
-    image: tailscale/tailscale:latest
-    container_name: tailscaled
-    hostname: ${NODENAME}
-    environment:
-      - TS_AUTHKEY=${WG_AUTHKEY}
-      - TS_STATE_DIR=/var/lib/tailscale
-      - TS_EXTRA_ARGS=${LOGIN_SERVER:+--login-server=${LOGIN_SERVER}}
-      - TS_TAILSCALED_EXTRA_ARGS=--socket=/var/run/tailscale/tailscaled.sock
-    volumes:
-      - wgstate:/var/lib/tailscale
-    cap_add:
-      - NET_ADMIN
-      - NET_RAW
-    restart: unless-stopped
-    networks:
-      proxynet:
-        ipv4_address: 172.19.0.10
-
-  tailscaled-awg:
-    image: ltlei/tailscale-awg:latest
-    container_name: tailscaled-awg
-    hostname: ${NODENAME}-awg
-    environment:
-      - TS_AUTHKEY=${AWG_AUTHKEY}
-      - TS_STATE_DIR=/var/lib/tailscale
-      - TS_EXTRA_ARGS=${LOGIN_SERVER:+--login-server=${LOGIN_SERVER}}
-      - TS_TAILSCALED_EXTRA_ARGS=--socket=/var/run/tailscale/tailscaled.sock
-    volumes:
-      - awgstate:/var/lib/tailscale
-    cap_add:
-      - NET_ADMIN
-      - NET_RAW
-    restart: unless-stopped
-    networks:
-      proxynet:
-        ipv4_address: 172.19.0.9
-
-volumes:
-  awgstate:
-  wgstate:   
-
-networks:
-  proxynet:
-    driver: bridge
-    ipam:
-      config:
-        - subnet: 172.19.0.0/24
+      gateway1:
+        condition: service_healthy
 ```
 
-Xray configuration would include fwmarks that we specified in SECONDARY_GATEWAYS env variable for the xray tproxy service:
+xray outbound configuration must have several "freedom" outbounds. One must be configured with `"sockopt": {"mark": 200}`, which is going to route traffic via hosts default gateway. Others should have fwmarks specified in the `SECONDARY_GATEWAYS` env variable - these outbounds will route traffic to ipv4 gateways corresponding to these fwmarks.
 
 ```json
-{
-  // ...
-  "inbounds": [  
-    {
-      "port": 2500,    
-      "listen": "0.0.0.0",
-      "protocol": "dokodemo-door",
-      "settings": {
-        "network": "tcp,udp",
-        "followRedirect": true
-      },
-      "sniffing": {
-        "enabled": true,
-        "routeOnly": true,
-        "destOverride": ["http","tls","quic"]
-      },
-      "streamSettings": {
-        "sockopt": {"tproxy": "tproxy"}
-      },
-      "tag": "tproxy"
-    }
-  ],
-  // ...
-  "outbounds": [  
+  "outbounds": [
     {
         "tag": "proxy",
         "protocol": "freedom",
@@ -131,6 +70,8 @@ Xray configuration would include fwmarks that we specified in SECONDARY_GATEWAYS
         }
     }
   ]
-    // ...
-}
 ```
+
+## Example
+
+TBA
