@@ -29,7 +29,7 @@ if [ -n "$GATEWAY_LIST" ]; then
     GATEWAY_LIST="${GATEWAY_LIST:2}"
 fi
 
-PROXY_NET="${PROXY_NET:-'172.17.0.0/16'}"
+WHITELIST="${WHITELIST:-'172.17.0.0/16'}"
 
 # Generate nftables.conf
 cat > /nftables.conf << EOF
@@ -50,16 +50,22 @@ table inet transparentproxy {
         meta iifname != "lo" meta mark 100 counter return
 
         # skip whitelist
-        ip saddr $PROXY_NET counter return
+        ip saddr { $WHITELIST } counter return
         ip daddr { $EXCLUDE_NETS_V4 } counter return
         ip6 daddr { $EXCLUDE_NETS_V6 } counter return
+
         # Divert gateway traffic from re-entering counter proxy
         ip saddr { $GATEWAY_LIST } counter return
         ip daddr { $GATEWAY_LIST } counter return
+
         # skip direct traffic returned from tproxy
         meta mark { $TPROXY_EXIT_LIST } counter return
+
         # skip SSH traffic
         tcp dport 22 counter return
+
+        # skip inbound connections
+        fib daddr type local counter return
 
         # send to tproxy
         meta l4proto { tcp, udp } meta mark set 100 tproxy ip to :$TPROXY_PORT  counter accept
@@ -70,13 +76,19 @@ table inet transparentproxy {
     chain tproxy-output {
         type route hook output priority filter; policy accept;
         # skip white list
-        ip saddr $PROXY_NET counter return
+        ip saddr $WHITELIST counter return
         ip daddr { $EXCLUDE_NETS_V4 } counter return
         ip6 daddr { $EXCLUDE_NETS_V6 } counter return
+
         # skip direct traffic returned from tproxy
         meta mark { $TPROXY_EXIT_LIST } counter return
+
         # skip SSH traffic to allow use as jumphost  
         tcp dport 22 counter return
+
+        # skip responses to inbound connections
+        ct direction reply counter return
+
         # send to tproxy
         meta l4proto { tcp, udp } meta mark 0 meta mark set 100 counter accept
     }

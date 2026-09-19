@@ -13,15 +13,15 @@ Traffic that is routed via tproxy:
 - host's outgoing traffic 
 
 Traffic that is not routed via tproxy:
-- any traffic originating from `PROXY_NET` (see below)
+- any traffic originating from `WHITELIST` (see below)
 - any traffic originaring from or destined to each IP specified in `SECONDARY_GATEWAYS` (see below)
 - traffic destined to reserved privite IP pools: 10.0.0.0/8,100.64.0.0/10,127.0.0.0/8,172.16.0.0/12,169.254.0.0/16,192.168.0.0/16,::1/128,fe80::/10,fc00::/7,ff00::/8
-- ssh traffic
+- inbound TCP traffic and statefull UDP traffic
 
 ## Usage
 
 This container must be launched with the following env variables:
-- `PROXY_NET`: IPv4 address of the network where secondary gateways are deployed. It won't be routed via tproxy.
+- `WHITELIST`: Comma-separated list of IPv4 address that should be whitelisted from entering tproxy. Set to entire docker network by default (172.17.0.0/16).
 - `SECONDARY_GATEWAYS`: a comma-separated list of 'fwmark:ipv4_gateway_adress' pairs. Each pair is converted to corresponding ip rules and tables for policy-based routing on tproxy exit.
 
 ```yaml
@@ -37,7 +37,7 @@ services:
     container_name: xray
     restart: always
     environment:
-      - PROXY_NET=172.19.0.0/24
+      - WHITELIST=172.19.0.0/24
       - SECONDARY_GATEWAYS=1:172.19.0.9
     volumes:
       - ./xray.json:/usr/local/etc/xray/config.json:ro
