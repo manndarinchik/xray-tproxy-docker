@@ -29,7 +29,7 @@ if [ -n "$GATEWAY_LIST" ]; then
     GATEWAY_LIST="${GATEWAY_LIST:2}"
 fi
 
-WHITELIST="${WHITELIST:-'172.17.0.0/16'}"
+WHITELIST="${WHITELIST:-172.17.0.0/16}"
 
 # Generate nftables.conf
 cat > /nftables.conf << EOF
